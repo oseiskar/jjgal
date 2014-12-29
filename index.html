@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Image gallery</title>
+        <link rel="stylesheet" href="http://netdna.bootstrapcdn.com/bootstrap/3.0.3/css/bootstrap.min.css"/>
+        <script type="text/javascript" src="http://code.jquery.com/jquery.js"></script>
+        <script type="text/javascript" src="http://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.5.2/underscore-min.js"></script>
+        <script type="text/javascript" src="http://cdnjs.cloudflare.com/ajax/libs/backbone.js/1.1.0/backbone-min.js"></script>
+        <script type="text/javascript" src="jjgal/gal.js"></script>
+        <script type="text/javascript">
+            $(document).ready(function() {
+                window.mainView = new MainView({el: $("#container")});
+            });
+        </script>
+        <style>
+            body { margin-top: 20px; }
+            .dir-nav { margin: 0; }
+            .image-grid { margin-top: 15px; }
+            .nav-text { padding: 10px; }
+            .image-nav { margin-bottom: 15px; }
+            #image-info { margin-bottom: 20px; }
+            .image-frame {
+                max-width: 100%;
+                margin-left: auto;
+                margin-right: auto;
+                display: block;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container main-container" id="container">
+        </div>
+        <script type="text/javascript" src="http://netdna.bootstrapcdn.com/bootstrap/3.0.3/js/bootstrap.min.js"></script>
+        <script id="navigation-template" type="text/template">
+            <ol class="breadcrumb dir-nav">
+                <li><a href="javascript:void(0)" class='navigate-up' data-level="-1">
+                    <span class="glyphicon glyphicon-tree-conifer"/>
+                </a></li>
+                <% _.each(path, function(subdir, index) { %>
+                    <li><a href="javascript:void(0)" class='navigate-up' data-level="<%= index %>"><%= subdir %></a></li>
+                <% }); %>
+                <li>
+                    <span id="filename-element"/>
+                </li>
+            </ol>
+        </script>
+        <script id="subdirs-template" type="text/template">
+            <div class="panel panel-default">
+                <div class="panel-body">
+                    <ul class="nav nav-pills">
+                        <% _.each(subdirs, function(subdir) { %>
+                            <li>
+                                <a class="subdir" href="javascript:void(0)" data-target="<%= subdir %>">
+                                    <span class="glyphicon glyphicon-folder-open"/>
+                                    &nbsp;
+                                    <b><%= subdir %></b>
+                                </a>
+                            </li>
+                        <% }); %>
+                        <li class="pull-right"><a href="javascript:void(0)" class='flatten-subdirs'>
+                            all
+                            <span class="glyphicon glyphicon-random"/>
+                        </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </script>
+        <script id="thumbnails-template" type="text/template">
+            <div class="row image-grid">
+                <% _.each(files, function(filename,index) { %>
+                    <div class="col-md-3">
+                        <a href="javascript:void(0)" name="<%= index %>" class="thumbnail" data-index="<%= index %>">
+                            <img src="<%= thumb_root + data[filename].thumb %>" alt="<%= filename %>" title="<%= filename %>"/>
+                        </a>
+                    </div>
+                <% }); %>
+            </div>
+        </script>
+        <script id="other-files-template" type="text/template">
+            <div class="panel panel-default">
+                <div class="panel-body">
+                    <ul class="nav nav-pills nav-stacked">
+                        <% _.each(files, function(filename) { %>
+                            <li>
+                                <a href="<%= dir + filename %>">
+                                    <span class="glyphicon glyphicon-file"/>
+                                    <%= filename %>
+                                    <span class="pull-right">
+                                        <%= fileSize(data[filename].size) %>
+                                    </span>
+                                </a>
+                            </li>
+                        <% }); %>
+                    </ul>
+                </div>
+            </div>
+        </script>
+        <script id="image-template" type="text/template">
+            <ul class="nav nav-pills image-nav">
+                <li <% if (is_first) { %> class="disabled" <% } else { %> class="prev-image" <% } %> ><a href="javascript:void(0)"><span class="glyphicon glyphicon-chevron-left"/></a></li>
+                <li <% if (is_last) { %> class="disabled" <% } else { %> class="next-image" <% } %> ><a href="javascript:void(0)"><span class="glyphicon glyphicon-chevron-right"/></a></li>
+                <li class="nav-text"><%= current_index+1 %> / <%= number_of_images %></li>
+                <li class="nav-text">
+                    <small><span class="glyphicon glyphicon-time"/></small>
+                    <%= new Date(image_time.time).toLocaleString() %>
+                </li>
+                <% if (image_time.exif) { %>
+                    <li>
+                        <a href="javascript:void(0)" data-toggle="collapse" data-target="#image-info">
+                            (exif)
+                        </a>
+                    </li>
+                <% } else { %>
+                    <li class="nav-text">(mtime)</li>
+                <% } %>
+                <li class="pull-right"><a class="close-image"><span class="glyphicon glyphicon-remove"/></a></li>
+            </ul>
+            <% if (data.exif) { %>
+                <ul id="image-info" class="collapse out">
+                    <% _.each(data.exif, function (value, key) { %>
+                        <li>
+                            <b><%= key %></b>
+                            <%= value %>
+                        </li>
+                    <% }); %>
+                </ul>
+            <% } %>
+            <a href="<%= original_src %>" target="_blank">
+                <img class="image-frame" src="<%= src %>" alt="<%= filename %>" title="<%= filename %>"/>
+            </a>
+        </script>
+    </body>
+</html>
