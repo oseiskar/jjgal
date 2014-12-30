@@ -24,7 +24,7 @@ if target_dir[-1] == '/': target_dir = target_dir[:-1]
 data_dir = os.path.dirname(sys.argv[0])
 if len(data_dir) > 0: data_dir += '/'
 
-target_gallery_dir = target_dir + '/jjgal/'
+target_gallery_dir = target_dir + '/.jjgal/'
 
 def ensure_dir_exists(filename):
     d = os.path.dirname(filename)
@@ -174,7 +174,7 @@ for root, _, files in os.walk(root_path):
     if path == '/' or len(path) == 0: path = []
     else:
         path = path.split('/')
-        if path[0] == 'jjgal':
+        if path[0] == '.jjgal':
             print 'skipping', path
             continue
     
@@ -186,7 +186,7 @@ rewrite_index = args.fresh or args.rewrite_index
 if rewrite_index or not os.path.exists(target_gallery_dir + 'gal.js'):
     copy_file(data_dir + 'gal.js', target_gallery_dir)
 
-if rewrite_index or not os.path.exists(target_gallery_dir + 'gal.js'):
+if rewrite_index or not os.path.exists(target_dir + 'index.html'):
     copy_file(data_dir + 'index.html', target_dir)
 
 orig_dir = os.path.relpath(root_path, target_dir)

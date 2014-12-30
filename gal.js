@@ -10,7 +10,7 @@ MainView = Backbone.View.extend({
     // basic boostrap initialization and rendering
     
     initialize: function(options) {
-        this.web_root = 'jjgal/';
+        this.web_root = '.jjgal/';
         this.current_image = null;
         this.flattened = false;
         this.fetchData();
