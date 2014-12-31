@@ -64,18 +64,29 @@ class Image:
         self.img = PILImage.open(filename)
     
     @property
-    def size(self): self.img.size
+    def size(self): return self.img.size
     
     def process_exif(self):
         
         info = {}
-        info['resolution'] = self.size
         if hasattr(self.img,'_getexif') and self.img._getexif() is not None:
+            
+            TRANSPOSES = {
+                3: PILImage.ROTATE_180,
+                6: PILImage.ROTATE_270,
+                8: PILImage.ROTATE_90
+            }
+            
             exif = {
                 ExifTags.TAGS[k]: v
                 for k, v in self.img._getexif().items()
                 if k in ExifTags.TAGS
             }
+            
+            transpose = TRANSPOSES.get(exif.get('Orientation',None),None)
+            if transpose is not None:
+                print 'transposing by', transpose
+                self.img = self.img.transpose(transpose)
             
             for k, v in exif.items():
                 try:
@@ -87,6 +98,8 @@ class Image:
                 except: exif[k] = '[binary]'
             
             info['exif'] = exif
+            
+        info['resolution'] = self.size
         
         return info
     
@@ -221,8 +234,8 @@ class Directory:
     def __getitem__(self, path):
         """
         Get or create a subdirectory object. For example, if 
-        d = Directory('/home', ['user']) then d['Pictures'] represents the
-        (sub)directory home/user/Pictures
+        g = Gallery('home/'); d = Directory(g, ['user']) then d['Pictures']
+        represents the (sub)directory home/user/Pictures
         """
         
         if len(path) == 0: return self
@@ -250,7 +263,7 @@ class Directory:
     def push_file(self, f):
         """
         Should be called for each file in this directory when walking the
-        directory structure (in walk_and_update). Processes a new image.
+        directory structure (in Gallery.walk_and_update). Processes new images.
         """
         
         cached = self.cached_data[u'images'].pop(f, None)
