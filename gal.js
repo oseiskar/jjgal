@@ -242,7 +242,7 @@ function getImageTime(img) {
         // try to parse exif timestamp
         
         date_time = img.exif.DateTime.split(' ');
-        iso_8601 = date_time[0].replace(':','-') + ' ' + date_time[1]
+        iso_8601 = date_time[0].replace(/:/g,'-') + ' ' + date_time[1]
         return {
             exif: true,
             time: Date.parse(iso_8601)
