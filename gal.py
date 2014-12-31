@@ -1,5 +1,7 @@
 import os, argparse, json, time, shutil, sys, glob
-from PIL import Image, ExifTags
+from PIL import ExifTags, Image as PILImage
+
+GALLERY_DIR = '.jjgal'
 
 def parse_arguments():
     arg_parser = argparse.ArgumentParser()
@@ -17,92 +19,249 @@ def parse_arguments():
 
 args = parse_arguments()
 
-target_dir = args.target_dir
-if target_dir is None: target_dir = args.source_dir
-if target_dir[-1] == '/': target_dir = target_dir[:-1]
+# --- helpers
+class File:
 
-data_dir = os.path.dirname(sys.argv[0])
-if len(data_dir) > 0: data_dir += '/'
-
-target_gallery_dir = target_dir + '/.jjgal/'
-
-def ensure_dir_exists(filename):
-    d = os.path.dirname(filename)
-    if len(d) > 0 and not os.path.exists(d):
-        print 'creating', d
-        if not args.dry_run: os.makedirs(d)
-
-def write_file(fn, contents):
-    ensure_dir_exists(fn)
-    print 'writing', fn
-    if not args.dry_run:
-        with open(fn, 'w') as f:
-            f.write(contents)
-
-def copy_file(src, target_dir):
-    ensure_dir_exists(target_dir)
-    print 'copying', src, 'to', target_dir
-    if not args.dry_run:
-        shutil.copy(src, target_dir)
-
-class Thumbnail:
-    
-    FORMAT = "jpg"
-    
-    name_base = str(int(time.time()))
-    name_counter = 0
-    
     @staticmethod
-    def create(img, max_w, max_h, **save_options):
+    def ensure_dir_exists(filename):
+        d = os.path.dirname(filename)
+        if len(d) > 0 and not os.path.exists(d):
+            print 'creating', d
+            if not args.dry_run: os.makedirs(d)
+
+    @staticmethod
+    def write(fn, contents):
+        File.ensure_dir_exists(fn)
+        print 'writing', fn
+        if not args.dry_run:
+            with open(fn, 'w') as f:
+                f.write(contents)
+
+    @staticmethod
+    def copy(src, target_dir):
+        File.ensure_dir_exists(target_dir)
+        print 'copying', src, 'to', target_dir
+        if not args.dry_run:
+            shutil.copy(src, target_dir)
+
+    @staticmethod
+    def delete(fn):
+        if os.path.exists(fn):
+            print 'deleting', fn
+            if not args.dry_run: os.unlink(fn)
+
+def merge_dict(a, b):
+    return dict(a.items() + b.items())
+
+class Image:
+    
+    THUMBNAIL_FORMAT = "jpg"
+    
+    thumb_name_base = str(int(time.time()))
+    thumb_name_counter = 0
+    
+    def __init__(self, filename):
+        self.img = PILImage.open(filename)
+    
+    @property
+    def size(self): self.img.size
+    
+    def process_exif(self):
         
-        name = str(Thumbnail.name_base) + "_" + str(Thumbnail.name_counter)
-        name += '.' + Thumbnail.FORMAT
+        info = {}
+        info['resolution'] = self.size
+        if hasattr(self.img,'_getexif') and self.img._getexif() is not None:
+            exif = {
+                ExifTags.TAGS[k]: v
+                for k, v in self.img._getexif().items()
+                if k in ExifTags.TAGS
+            }
+            
+            for k, v in exif.items():
+                try:
+                    MAX_LEN = 200
+                    v = unicode(str(v))
+                    if len(v) > MAX_LEN:
+                        v = v[:MAX_LEN] + '...'
+                        exif[k] = v
+                except: exif[k] = '[binary]'
+            
+            info['exif'] = exif
         
-        Thumbnail.name_counter += 1
+        return info
+    
+    def create_thumbnails(self, folder):
+        
+        info = {}
+        info['thumb'] = self.create_thumbnail( folder, \
+            args.thumb_width, args.thumb_height, quality=80)
+        
+        if args.frame_width is not None:
+            frame_height = args.frame_height
+            if frame_height == None: frame_height = args.frame_width
+            info['frame'] = self.create_thumbnail( folder, \
+                args.frame_width, frame_height, quality=90)
+        
+        return info
+    
+    def create_thumbnail(self, folder, max_w, max_h, **save_options):
+        
+        name = str(Image.thumb_name_base) + "_" + str(Image.thumb_name_counter)
+        name += '.' + Image.THUMBNAIL_FORMAT
+        
+        Image.thumb_name_counter += 1
         
         if not args.dry_run:
-            thumb = img.copy()
-            thumb.thumbnail((max_w, max_h), Image.ANTIALIAS)
-            thumb.save(target_gallery_dir + name, **save_options)
+            thumb = self.img.copy()
+            thumb.thumbnail((max_w, max_h), PILImage.ANTIALIAS)
+            thumb.save(os.path.join(folder,name), **save_options)
             
         print "\tcreated < %dx%d thumbnail %s" % (max_w, max_h, name)
         
         return name
 
-class Dir:
-    def __init__(self, path=[]):
-        self.path = path
+class Gallery:
+    
+    META_DIR = '.jjgal'
+    
+    def __init__(self, src_dir, target_dir):
+        """Main method"""
+        
+        self.root_path = src_dir
+        if target_dir is None: target_dir = src_dir
+        self.target_dir = target_dir
+        self.data_dir = os.path.join(target_dir, Gallery.META_DIR)
+        
+        cached_data = {}
+        
+        metadata_file = os.path.join(self.data_dir, 'metadata.json')
+        if args.fresh:
+            glob_format = os.path.join(self.data_dir, '*.'+Image.THUMBNAIL_FORMAT)
+            for f in glob.glob(glob_format):  File.delete(f)
+        else:
+            if os.path.exists(metadata_file):
+                print 'loading', metadata_file
+                with open(metadata_file) as f:
+                    cached_data = json.load(f)['files']
+        
+        self.root_obj = Directory(self, [], cached_data)
+        self.walk_and_update()
+        self.write_web_files()
+        self.write_metadata(metadata_file)
+    
+    def write_metadata(self, metadata_file):
+
+        orig_dir = os.path.relpath(self.root_path, self.target_dir)
+        if orig_dir == '.': orig_dir = ''
+
+        File.write(metadata_file, \
+            json.dumps({
+                'files': self.root_obj.as_json(),
+                'gallery': {
+                    'original_dir': orig_dir,
+                    'title': args.title
+                }
+            }))
+    
+    def write_web_files(self):
+        
+        src_dir = os.path.dirname(sys.argv[0])
+        
+        rewrite_index = args.fresh or args.rewrite_index
+
+        if rewrite_index or not os.path.exists(os.path.join(self.data_dir,'gal.js')):
+            File.copy(os.path.join(src_dir, 'gal.js'), self.data_dir)
+
+        if rewrite_index or not os.path.exists(os.path.join(self.target_dir,'index.html')):
+            File.copy(os.path.join(src_dir,'index.html'), self.target_dir)
+    
+    def walk_and_update(self):
+        
+        for root, _, files in os.walk(self.root_path):
+            path = root[len(self.root_path):]
+            if path == '/' or len(path) == 0: path = []
+            else:
+                path = path.split('/')
+                if path[0] == Gallery.META_DIR:
+                    print 'skipping', path
+                    continue
+            
+            dir_obj = self.root_obj[path]
+            for f in files: dir_obj.push_file(f)
+
+class Directory:
+    
+    def __init__(self, gallery, rel_path=[], cached_data = {}):
+        """
+        gallery defines (among other things), the root directory of the
+        whole structure, e.g., (e.g., '/home/user') which is the same for all
+        the subdirectories. 
+        
+        rel_path is the path (as a list of subdirectories) from root_path to
+        the subdirectory represented by this object, e.g., if
+        g = Gallery('/home/user'), then Directory(g, ['Pictures', 'foobar'])
+        represents the folder '/home/user/Pictures/foobar'
+        
+        cached_data is the stored JSON/dictionary metadata for this directory,
+        if exists.
+        """
+        
+        self.path = rel_path
         self.subdirs = {}
         self.images = {}
         self.other_files = {}
+        self.gallery = gallery
+        
+        # in Python 2, JSON-parsed strings are unicode, OS path strings are
+        # not. this causes some trouble...
+        
+        self.cached_data = { k : cached_data.get(k, {})
+            for k in [u'subdirs', u'images', u'other_files'] }
         
     def __getitem__(self, path):
+        """
+        Get or create a subdirectory object. For example, if 
+        d = Directory('/home', ['user']) then d['Pictures'] represents the
+        (sub)directory home/user/Pictures
+        """
         
         if len(path) == 0: return self
         
-        if path[0] not in self.subdirs:
-            self.subdirs[path[0]] = Dir(self.path + [path[0]])
+        subdir = unicode(path[0])
         
-        return self.subdirs[path[0]][path[1:]]
+        if subdir not in self.subdirs:
+            self.subdirs[subdir] = Directory(self.gallery, \
+                self.path + [subdir], \
+                self.cached_data[u'subdirs'].get(subdir,{}))
+        
+        return self.subdirs[subdir][path[1:]]
     
     def as_json(self):
+        """
+        JSON/dictionary representation of this object
+        """
+        
         return {
             'subdirs': { k : v.as_json() for k,v in self.subdirs.items() },
             'images': self.images,
             'other_files': self.other_files
         }
     
-    @staticmethod
-    def from_json(data, path=[]):
-        d = Dir(path)
-        for k,v in data['subdirs'].items():
-            d.subdirs[k] = Dir.from_json(v, path + [k])
-        d.images = data['images']
-        d.other_files = data['other_files']
-        return d
-    
-    def push_file(self, f, root_path):
-        if f in self.other_files or f in self.images: return
+    def push_file(self, f):
+        """
+        Should be called for each file in this directory when walking the
+        directory structure (in walk_and_update). Processes a new image.
+        """
+        
+        cached = self.cached_data[u'images'].pop(f, None)
+        if cached is not None:
+            self.images[f] = cached
+            return
+        
+        cached = self.cached_data[u'other_files'].pop(f, None)
+        if cached is not None:
+            self.other_files[f] = cached
+            return
         
         try: unicode(f)
         except:
@@ -113,7 +272,7 @@ class Dir:
         
         print 'new file', rel_path,
         
-        full_path = root_path + rel_path
+        full_path = self.gallery.root_path + rel_path
         
         (mode, ino, dev, nlink,
          uid, gid, size, atime,
@@ -125,78 +284,37 @@ class Dir:
         }
         
         try:
-            img = Image.open(full_path)
+            img = Image(full_path)
             print '-> image of size', img.size
-            file_info['resolution'] = img.size
-            if hasattr(img,'_getexif') and img._getexif() is not None:
-                file_info['exif'] = {
-                    ExifTags.TAGS[k]: v
-                    for k, v in img._getexif().items()
-                    if k in ExifTags.TAGS
-                }
-            
-                
-            file_info['thumb'] = Thumbnail.create(img, \
-                args.thumb_width, args.thumb_height, quality=80)
-            
-            if args.frame_width is not None:
-                frame_height = args.frame_height
-                if frame_height == None: frame_height = args.frame_width
-                file_info['frame'] = Thumbnail.create(img, \
-                    args.frame_width, frame_height, quality=90)
-            
-            self.images[f] = file_info
         
         except IOError:
             print '(not an image)'
             self.other_files[f] = file_info
-
-
-metadata_file = target_gallery_dir + 'metadata.json'
-
-root_obj = Dir()
-
-if args.fresh:
-    glob_format = target_gallery_dir + '*.' + Thumbnail.FORMAT
-    for f in glob.glob(glob_format):
-        print 'deleting', f
-        if not args.dry_run: os.unlink(f)
-else:
-    if os.path.exists(metadata_file):
-        print 'loading', metadata_file
-        with open(metadata_file) as f:
-            root_obj = Dir.from_json(json.load(f)['files'])
-
-root_path = args.source_dir
-
-for root, _, files in os.walk(root_path):
-    path = root[len(root_path):]
-    if path == '/' or len(path) == 0: path = []
-    else:
-        path = path.split('/')
-        if path[0] == '.jjgal':
-            print 'skipping', path
-            continue
+            return
+            
+        file_info = merge_dict(file_info, img.process_exif())
+        
+        try:
+            file_info = merge_dict(file_info, img.create_thumbnails(self.gallery.data_dir))
+            self.images[f] = file_info
+            
+        except IOError as e:
+            print 'failed to save:', e
     
-    dir_obj = root_obj[path]
-    for f in files: dir_obj.push_file(f,root_path)
-
-rewrite_index = args.fresh or args.rewrite_index
-
-if rewrite_index or not os.path.exists(target_gallery_dir + 'gal.js'):
-    copy_file(data_dir + 'gal.js', target_gallery_dir)
-
-if rewrite_index or not os.path.exists(target_dir + 'index.html'):
-    copy_file(data_dir + 'index.html', target_dir)
-
-orig_dir = os.path.relpath(root_path, target_dir)
-if orig_dir == '.': orig_dir = ''
-
-write_file(metadata_file, \
-    json.dumps({
-        'files': root_obj.as_json(),
-        'gallery': {
-            'original_dir': orig_dir,
-            'title': args.title
-        }
-    }))
+    def delete_orphaned_thumbnails(self):
+        """
+        Remove all thumbnail images that appeared in cached_data but were not
+        found when re-walking the directory structure
+        """
+        
+        def del_and_recurse_cache(c, path):
+            for s in c[u'subdirs']:
+                del_and_recurse_cache(c[u'subdirs'][s], path + [s])
+            for img, info in c[u'images'].items():
+                File.delete(os.path.join(self.gallery.data_dir, info[u'thumb']))
+                if u'frame' in info:
+                    File.delete(os.path.join(self.gallery.data_dir, info[u'frame']))
+        
+        del_and_recurse_cache(self.cached_data, self.path)
+        
+Gallery(args.source_dir, args.target_dir)
