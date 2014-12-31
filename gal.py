@@ -49,6 +49,16 @@ class File:
         if os.path.exists(fn):
             print 'deleting', fn
             if not args.dry_run: os.unlink(fn)
+    
+    @staticmethod
+    def trim_path(path, include_slash = True):
+        if path == '.': return ''
+        if len(path) > 0:
+            if include_slash:
+                if path[-1] != '/': path += '/'
+            else:
+                if path[-1] == '/': path = path[:-1]
+        return path
 
 def merge_dict(a, b):
     return dict(a.items() + b.items())
@@ -143,7 +153,7 @@ class Gallery:
         self.root_path = src_dir
         if target_dir is None: target_dir = src_dir
         self.target_dir = target_dir
-        self.data_dir = os.path.join(target_dir, Gallery.META_DIR)
+        self.data_dir = File.trim_path(os.path.join(target_dir, Gallery.META_DIR))
         
         cached_data = {}
         
@@ -157,6 +167,7 @@ class Gallery:
                 with open(metadata_file) as f:
                     cached_data = json.load(f)['files']
         
+        File.ensure_dir_exists(self.data_dir)
         self.root_obj = Directory(self, [], cached_data)
         self.walk_and_update()
         self.write_web_files()
@@ -164,8 +175,8 @@ class Gallery:
     
     def write_metadata(self, metadata_file):
 
-        orig_dir = os.path.relpath(self.root_path, self.target_dir)
-        if orig_dir == '.': orig_dir = ''
+        orig_dir = File.trim_path(\
+            os.path.relpath(self.root_path, self.target_dir), False)
 
         File.write(metadata_file, \
             json.dumps({
@@ -191,8 +202,9 @@ class Gallery:
     def walk_and_update(self):
         
         for root, _, files in os.walk(self.root_path):
-            path = root[len(self.root_path):]
-            if path == '/' or len(path) == 0: path = []
+            path = os.path.relpath(root, self.root_path)
+            
+            if path == '.': path = []
             else:
                 path = path.split('/')
                 if path[0] == Gallery.META_DIR:
@@ -281,11 +293,11 @@ class Directory:
             print "invalid encoding in", f
             return
         
-        rel_path = '/'.join(self.path + [f])
+        rel_path = os.path.join(*(self.path + [f]))
         
         print 'new file', rel_path,
         
-        full_path = self.gallery.root_path + rel_path
+        full_path = os.path.join(self.gallery.root_path, rel_path)
         
         (mode, ino, dev, nlink,
          uid, gid, size, atime,
