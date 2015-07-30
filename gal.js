@@ -241,7 +241,14 @@ function getImageTime(img) {
     if (img.exif && img.exif.DateTime) {
         // try to parse exif timestamp
         
-        date_time = img.exif.DateTime.split(' ');
+        if (img.exif.DateTimeOriginal) {
+            date_time = img.exif.DateTimeOriginal;
+        } else {
+            date_time = img.exif.DateTime;
+        }
+
+        date_time = date_time.split(' ');
+
         iso_8601 = date_time[0].replace(/:/g,'-') + 'T' + date_time[1]
         return {
             exif: true,
